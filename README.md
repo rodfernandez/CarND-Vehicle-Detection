@@ -1,33 +1,90 @@
-# Vehicle Detection
-[![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
+# Vehicle Detection and Tracking
+
+## [Rubric Points](https://review.udacity.com/#!/rubrics/513/view)
+
+### Histogram of Oriented Gradients (HOG)
+
+> Explain how (and identify where in your code) you extracted HOG features from the training images. Explain how you settled on your final choice of HOG parameters. Explanation given for methods used to extract HOG features, including which color space was chosen, which HOG parameters (orientations, pixels_per_cell, cells_per_block), and why.
+
+The [features.HogFeatures#extract](scripts/features.py#L93) method will return the HOG features from the following parameters:
+
+* `color_space: ColorSpace = ColorSpace.GRAY`;
+* `color_channels: set = {0}`;
+* `orientations: int = 9`;
+* `pixels_per_cell: (int, int) = (8, 8)`;
+* `cells_per_block: (int, int) = (2, 2)`;
+* `feature_vector=True`.
+
+These parameters are relayed to the `skimage.feature.hog` method along `transform_sqrt=True`.
+
+In the [training.py](scripts/training.py) script, I initially found a good compromise between accuracy and time to train the model using just the **Y channel** from the *YCrCb color space* and **9 orientation bins**, however while running the pipeline, the model had trouble to detect **black vehicles**, so I added the other 2 channels and increased the orientation bins to 12. The other parameters were easier to tune by observing the training accuracy. The [final values](scripts/training.py#L17) were:
+
+* `color_space=ColorSpace.YCrCb`;
+* `color_channels={0, 1, 2}`;
+* `orientations=12`;
+* `pixels_per_cell=(8, 8)`;
+* `cells_per_block=(2, 2)`.
+
+> Describe how (and identify where in your code) you trained a classifier using your selected HOG features (and color features if you used them). The HOG features extracted from the training data have been used to train a classifier, could be SVM, Decision Tree or other. Features should be scaled to zero mean and unit variance before training the classifier.
 
 
-In this project, your goal is to write a software pipeline to detect vehicles in a video (start with the test_video.mp4 and later implement on full project_video.mp4), but the main output or product we want you to create is a detailed writeup of the project.  Check out the [writeup template](https://github.com/udacity/CarND-Vehicle-Detection/blob/master/writeup_template.md) for this project and use it as a starting point for creating your own writeup.  
+The [training script](scripts/training.py#L41) loads the provided dataset of [vehicles](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/vehicles.zip) and [non-vehicles](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/non-vehicles.zip) images before invoking the [features.Features#extract](scripts/features.py#L57) method for each image with the following options:
 
-Creating a great writeup:
----
-A great writeup should include the rubric points as well as your description of how you addressed each point.  You should include a detailed description of the code used in each step (with line-number references and code snippets where necessary), and links to other supporting documents or external references.  You should include images in your writeup to demonstrate how your code works with examples.  
+```
+FeaturesOptions(
+    color_options=ColorOptions(
+        color_space=ColorSpace.HSV,
+        bins_count=32
+    ),
+    hog_options=HogOptions(
+        color_space=ColorSpace.YCrCb,
+        color_channels={0, 1, 2},
+        orientations=12,
+        pixels_per_cell=(8, 8),
+        cells_per_block=(2, 2)
+    ),
+    spatial_options=SpatialOptions(
+        color_space=ColorSpace.YCrCb,
+        size=(32, 32)
+    ))
+```
 
-All that said, please be concise!  We're not looking for you to write a book here, just a brief description of how you passed each rubric point, and references to the relevant code :). 
+With those options, the features vectors are 10,224 elements long, combining color, HOG and spatial features.
 
-You can submit your writeup in markdown or use another method and submit a pdf instead.
+These vectors are scaled by a `sklearn.preprocessing.data.StandardScaler` instance in order to have zero mean and unit variance. Finally, the model was trained by a `sklearn.svm.classes.LinearSVC` instance with test split of **80/20**. These settings led to a training accuracy greater than **98%**.
 
-The Project
----
+### Sliding Window Search
 
-The goals / steps of this project are the following:
+> Describe how (and identify where in your code) you implemented a sliding window search. How did you decide what scales to search and how much to overlap windows? A sliding window approach has been implemented, where overlapping tiles in each test image are classified as vehicle or non-vehicle. Some justification has been given for the particular implementation chosen.
 
-* Perform a Histogram of Oriented Gradients (HOG) feature extraction on a labeled training set of images and train a classifier Linear SVM classifier
-* Optionally, you can also apply a color transform and append binned color features, as well as histograms of color, to your HOG feature vector. 
-* Note: for those first two steps don't forget to normalize your features and randomize a selection for training and testing.
-* Implement a sliding-window technique and use your trained classifier to search for vehicles in images.
-* Run your pipeline on a video stream (start with the test_video.mp4 and later implement on full project_video.mp4) and create a heat map of recurring detections frame by frame to reject outliers and follow detected vehicles.
-* Estimate a bounding box for vehicles detected.
+In the [pipeline script](scripts/pipeline.py#L24), following the remark that vehicles further away would appear smaller, I wrote a routine that would generate windows with dimensions ranging from 64 to 256 pixels wide, were the smaller windows would suffice to frame further vehicles at the top of the region of interest, where larger windows would frame vehicles close to the camera. There is also a variable overlapping from 50% to 88% depending on the window size. These values were tuned empirically.
 
-Here are links to the labeled data for [vehicle](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/vehicles.zip) and [non-vehicle](https://s3.amazonaws.com/udacity-sdc/Vehicle_Tracking/non-vehicles.zip) examples to train your classifier.  These example images come from a combination of the [GTI vehicle image database](http://www.gti.ssr.upm.es/data/Vehicle_database.html), the [KITTI vision benchmark suite](http://www.cvlibs.net/datasets/kitti/), and examples extracted from the project video itself.   You are welcome and encouraged to take advantage of the recently released [Udacity labeled dataset](https://github.com/udacity/self-driving-car/tree/master/annotations) to augment your training data.  
+> Show some examples of test images to demonstrate how your pipeline is working. How did you optimize the performance of your classifier? Some discussion is given around how you improved the reliability of the classifier i.e., fewer false positives and more reliable car detections (this could be things like choice of feature vector, thresholding the decision function, hard negative mining etc.)
 
-Some example images for testing your pipeline on single frames are located in the `test_images` folder.  To help the reviewer examine your work, please save examples of the output from each stage of your pipeline in the folder called `ouput_images`, and include them in your writeup for the project by describing what each image shows.    The video called `project_video.mp4` is the video your pipeline should work well on.  
+In the following picture we observe how good the trained model performed for the given frames under the [test_images directory](test_images):
 
-**As an optional challenge** Once you have a working pipeline for vehicle detection, add in your lane-finding algorithm from the last project to do simultaneous lane-finding and vehicle detection!
+![](output_images/pipeline.jpg)
 
-**If you're feeling ambitious** (also totally optional though), don't stop there!  We encourage you to go out and take video of your own, and show us how you would implement this project on a new video!
+There are no false positives and the vehicles inside the region of interest were successfully detected by simply computing a heatmap and applying a threshold of 1.
+
+### Video Implementation
+
+> Provide a link to your final video output. Your pipeline should perform reasonably well on the entire project video (somewhat wobbly or unstable bounding boxes are ok as long as you are identifying the vehicles most of the time with minimal false positives.) The sliding-window search plus classifier has been used to search for and identify vehicles in the videos provided. Video output has been generated with detected vehicle positions drawn (bounding boxes, circles, cubes, etc.) on each frame of video.
+
+The output video can be downloaded from [here](output.mp4).
+
+> Describe how (and identify where in your code) you implemented some kind of filter for false positives and some method for combining overlapping bounding boxes. A method, such as requiring that a detection be found at or near the same position in several subsequent frames, (could be a heat map showing the location of repeat detections) is implemented as a means of rejecting false positives, and this demonstrably reduces the number of false positives. Same or similar method used to draw bounding boxes (or circles, cubes, etc.) around high-confidence detections where multiple overlapping detections occur.
+
+In the [pipeline](scripts/pipeline.py) script, the [process_image](scripts/pipeline.py#L83) function creates a heatmap and applies the given threshold (in this case 1) to filter out false positives, just like illustrated by the test images.
+
+### Discussion
+
+> Briefly discuss any problems / issues you faced in your implementation of this project. Where will your pipeline likely fail? What could you do to make it more robust? Discussion includes some consideration of problems/issues faced, what could be improved about their algorithm/pipeline, and what hypothetical cases would cause their pipeline to fail.
+
+While evaluating the output video we can identify a few issues:
+
+1. Differently from results for the test images, we can notice there are a few false positives in certain frames. We could mitigate them by increasing the threshold, but that would lead to frames where vehicles would not be detected. A better way to mitigate those would be by augmenting the training dataset by using techniques applied to previous projects like random contrast and flipping. Adding more non-vehicle sample, with a better representation of the landscape in a Californian highway would definitely help;
+
+2. The bound boxes look unstable and could use a smoothing function, like averaging the past few frames;
+
+3. The time to each frame was close to 3 seconds. In order to have real-time processing, we would need to increase the performance by 2 orders of magnitude. This might be feasible if we could reduce the size of the features vector, by removing spatial features and maybe limiting the HOG features to 2 color channels. Another improvement would be extracting the HOG vector only once for each frame, since the current script extracts it for every single sliding window.
